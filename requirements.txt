@@ -1,0 +1,1 @@
+numpy>=1.26\nstreamlit>=1.35\nfastapi>=0.110\nuvicorn[standard]>=0.29\npydantic>=2.6\npython-dotenv>=1.0\nmatplotlib>=3.8\npytest>=8.0\n
