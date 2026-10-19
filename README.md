@@ -42,8 +42,7 @@ Enter these in the task box:
 4. **Basic task**
    `Create a folder called College`
 
-## Local workspace and safety
-
+## Plan from a text file\n\nOpen the **Plan from .txt** tab and upload a UTF-8 `.txt` file such as `portion.txt`. It extracts bullet points, numbered entries, headings/lines, and comma- or semicolon-separated topics, then builds an ordered checklist, rough per-topic time estimates, session groupings, and a downloadable JSON plan. This is a deterministic heuristic planner: review its extracted topics and estimates before relying on it. It generates a plan; it does not execute arbitrary instructions found in uploaded files.\n\n## Local workspace and safety\n
 The app's **Desktop workspace** mode uses a dedicated `HerMissWorkspace` folder on the Desktop by default. The displayed workspace path is the boundary for all filesystem operations. You can override it in `.env`:
 
 ```dotenv
