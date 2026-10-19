@@ -3,21 +3,25 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")
 
 
 def _default_desktop() -> Path:
     """Resolve a common Windows Desktop location, including OneDrive redirection."""
     home = Path.home()
+    one_drive = os.environ.get("OneDrive")
     candidates = [
         home / "Desktop",
         home / "OneDrive" / "Desktop",
-        Path(os.environ.get("OneDrive", "")) / "Desktop" if os.environ.get("OneDrive") else home / "Desktop",
     ]
+    if one_drive:
+        candidates.insert(0, Path(one_drive) / "Desktop")
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
-    # A predictable fallback; users can override HERMISS_WORKSPACE in .env.
     return home / "Desktop"
 
 
@@ -42,9 +46,9 @@ class RewardConfig:
     step_cost: float = -1.0
 
 
-SANDBOX_DIR = Path(os.getenv("HERMISS_SANDBOX", str(ROOT / "data" / "sandbox"))).expanduser().resolve()
-DB_PATH = Path(os.getenv("HERMISS_DB", str(ROOT / "data" / "hermiss.sqlite3"))).expanduser().resolve()
-OUTPUT_DIR = Path(os.getenv("HERMISS_OUTPUT", str(ROOT / "outputs"))).expanduser().resolve()
+SANDBOX_DIR = Path(os.getenv("HERMISS_SANDBOX") or (ROOT / "data" / "sandbox")).expanduser().resolve()
+DB_PATH = Path(os.getenv("HERMISS_DB") or (ROOT / "data" / "hermiss.sqlite3")).expanduser().resolve()
+OUTPUT_DIR = Path(os.getenv("HERMISS_OUTPUT") or (ROOT / "outputs")).expanduser().resolve()
 LOCAL_WORKSPACE_DIR = Path(
-    os.getenv("HERMISS_WORKSPACE", str(_default_desktop() / "HerMissWorkspace"))
+    os.getenv("HERMISS_WORKSPACE") or (_default_desktop() / "HerMissWorkspace")
 ).expanduser().resolve()
