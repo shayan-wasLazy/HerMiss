@@ -6,6 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 from agents.planner import PlannerAgent, PlanningError
+from agents.document_planner import build_document_plan, DocumentPlanningError
 from agents.action_agent import ActionAgent
 from config.settings import (
     SANDBOX_DIR, LOCAL_WORKSPACE_DIR, DB_PATH, OUTPUT_DIR, RLConfig
@@ -53,7 +54,7 @@ agent = QLearningAgent(
 )
 store = RunStore(DB_PATH)
 
-tab, training, history = st.tabs(["Task execution", "RL training", "History"])
+tab, document_planning, training, history = st.tabs(["Task execution", "Plan from .txt", "RL training", "History"])
 with tab:
     st.write("Try multi-step project scaffolding, type-based file organization, or a workspace audit. File actions remain restricted to the selected workspace; mouse, keyboard, and arbitrary application control are not enabled.")
     with st.expander("Example tasks to demonstrate"):
@@ -99,6 +100,39 @@ with tab:
             st.error(str(exc))
         except Exception as exc:
             st.error(f"Task failed safely: {exc}")
+
+with document_planning:
+    st.subheader("Turn a text file into a practical plan")
+    st.write("Upload a syllabus/portion, assignment brief, or task list as a .txt file. HerMiss extracts topics and creates an ordered checklist with rough study-time estimates and session grouping. This creates a plan only; it does not execute the document's contents as PC actions.")
+    uploaded = st.file_uploader("Choose a text file", type=["txt"], key="document_plan_upload")
+    if uploaded is not None:
+        try:
+            document_text = uploaded.getvalue().decode("utf-8-sig")
+            document_plan = build_document_plan(document_text, uploaded.name)
+            st.success(f"Generated a plan from {document_plan['source_file']}")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Topics / tasks", document_plan["topic_count"])
+            m2.metric("Estimated time", f"{document_plan['estimated_total_hours']} hours")
+            m3.metric("Planned sessions", len(document_plan["sessions"]))
+            st.subheader("Step-by-step plan")
+            st.dataframe(document_plan["items"], use_container_width=True, hide_index=True)
+            st.subheader("Suggested sessions")
+            for session in document_plan["sessions"]:
+                with st.expander(f"Session {session['session']} · {session['estimated_minutes']} min"):
+                    for topic in session["topics"]:
+                        st.markdown(f"- {topic}")
+            st.info(document_plan["review"])
+            st.caption(document_plan["note"])
+            st.download_button(
+                "Download plan as JSON",
+                data=__import__("json").dumps(document_plan, indent=2, ensure_ascii=False),
+                file_name=f"{Path(uploaded.name).stem}_plan.json",
+                mime="application/json",
+            )
+        except UnicodeDecodeError:
+            st.error("This file is not UTF-8 text. Save it as UTF-8 and upload it again.")
+        except DocumentPlanningError as exc:
+            st.error(str(exc))
 
 with training:
     st.caption("Training episodes use temporary synthetic sandboxes, not your Desktop workspace.")
