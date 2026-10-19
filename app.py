@@ -1,4 +1,5 @@
 """HerMiss Streamlit dashboard with sandbox and restricted local-workspace modes."""
+import json
 import tempfile
 import time
 from pathlib import Path
@@ -125,7 +126,7 @@ with document_planning:
             st.caption(document_plan["note"])
             st.download_button(
                 "Download plan as JSON",
-                data=__import__("json").dumps(document_plan, indent=2, ensure_ascii=False),
+                data=json.dumps(document_plan, indent=2, ensure_ascii=False),
                 file_name=f"{Path(uploaded.name).stem}_plan.json",
                 mime="application/json",
             )
