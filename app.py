@@ -55,10 +55,12 @@ store = RunStore(DB_PATH)
 
 tab, training, history = st.tabs(["Task execution", "RL training", "History"])
 with tab:
-    st.write("For local file mode, HerMiss can create folders inside the workspace. It does not control the mouse, keyboard, or arbitrary applications.")
+    st.write("Try multi-step project scaffolding, type-based file organization, or a workspace audit. File actions remain restricted to the selected workspace; mouse, keyboard, and arbitrary application control are not enabled.")
+    with st.expander("Example tasks to demonstrate"):
+        st.code("Set up a Python project called VisionAI\\nOrganize my workspace by file type\\nAudit my workspace\\nCreate a folder called College", language=None)
     goal = st.text_input(
         "What should HerMiss do?",
-        placeholder="Create a folder called College",
+        placeholder="Set up a Python project called VisionAI",
     )
     if st.button("Run task", type="primary"):
         try:
@@ -88,6 +90,9 @@ with tab:
             st.write("Plan:", [s.description for s in plan.subtasks])
             if success:
                 st.success(f"Task completed. Workspace: {active_root}")
+            if env.last_result is not None:
+                st.subheader("Task output")
+                st.json(env.last_result)
             if env.errors:
                 st.warning("; ".join(env.errors))
         except PlanningError as exc:
