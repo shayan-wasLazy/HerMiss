@@ -20,10 +20,11 @@ def extract_topics(text: str) -> list[str]:
         line = raw.strip()
         if not line:
             continue
-        # Remove common list prefixes and simple section labels.
+        # Remove Markdown heading markers, list prefixes, and section labels.
+        line = re.sub(r"^#+\s*", "", line)
         line = re.sub(r"^(?:[-*•▪‣]+|\d+[.)]|(?:topic|unit|chapter)\s*\d*\s*[:.-])\s*", "", line, flags=re.I)
         line = line.strip(" \t:-")
-        if not line or line.startswith("#"):
+        if not line:
             continue
         # Treat comma/semicolon separated syllabus entries as individual topics.
         parts = re.split(r"\s*[;,]\s*", line)
