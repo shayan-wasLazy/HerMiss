@@ -10,6 +10,7 @@ import streamlit as st
 
 from agents.planner import PlannerAgent, PlanningError
 from agents.document_planner import build_document_plan, DocumentPlanningError
+from agents.adaptive_quiz import AdaptiveQuizPolicy, QuizGenerationError, generate_mcqs
 from agents.action_agent import ActionAgent
 from automation.academic_organizer import build_organization_plan, apply_organization, extract_zip_safely
 from automation.filesystem import SandboxFilesystem
@@ -59,7 +60,7 @@ agent = QLearningAgent(
 )
 store = RunStore(DB_PATH)
 
-overview, tab, document_planning, academic_organizer, training, analytics, safety_audit, workflow_builder, experiment_comparison, reports, history = st.tabs(["Overview", "Task automation", "Plan from .txt", "Smart file manager", "RL training studio", "Performance analytics", "Safety & audit", "Workflow builder", "Experiment comparison", "Export reports", "History"])
+overview, tab, document_planning, adaptive_quiz, academic_organizer, training, analytics, safety_audit, workflow_builder, experiment_comparison, reports, history = st.tabs(["Overview", "Task automation", "Plan from .txt", "Adaptive quiz", "Smart file manager", "RL training studio", "Performance analytics", "Safety & audit", "Workflow builder", "Experiment comparison", "Export reports", "History"])
 with tab:
     st.write("Try multi-step project scaffolding, type-based file organization, or a workspace audit. File actions remain restricted to the selected workspace; mouse, keyboard, and arbitrary application control are not enabled.")
     with st.expander("Example tasks to demonstrate"):
@@ -139,6 +140,102 @@ with document_planning:
         except DocumentPlanningError as exc:
             st.error(str(exc))
 
+
+with adaptive_quiz:
+    st.subheader("Adaptive MCQ practice from your notes")
+    st.write("Upload readable .txt notes. HerMiss builds fill-the-term MCQs from statements in the text, then uses a small Q-learning policy to prioritize weak or slow questions based on your attempts. It does not currently read PDF/Word files or generate expert-level semantic questions.")
+    quiz_policy = AdaptiveQuizPolicy(DB_PATH.with_name("quiz_progress.json"))
+    quiz_upload = st.file_uploader("Upload notes (.txt)", type=["txt"], key="adaptive_quiz_upload")
+    quiz_count = st.slider("Questions to generate", min_value=5, max_value=30, value=10, step=5, key="adaptive_quiz_count")
+    if st.button("Generate quiz from notes", type="primary", key="generate_adaptive_quiz"):
+        try:
+            if quiz_upload is None:
+                st.error("Upload a .txt file first.")
+            else:
+                source_text = quiz_upload.getvalue().decode("utf-8-sig")
+                generated = generate_mcqs(source_text, quiz_count, quiz_upload.name)
+                st.session_state["adaptive_quiz_questions"] = generated
+                st.session_state["adaptive_quiz_source"] = quiz_upload.name
+                st.session_state["adaptive_quiz_index"] = 0
+                st.session_state["adaptive_quiz_answers"] = {}
+                st.session_state["adaptive_quiz_feedback"] = None
+                st.session_state["adaptive_quiz_started_at"] = time.perf_counter()
+                st.success(f"Generated {len(generated)} MCQs from {quiz_upload.name}. Review the source statement shown with each question.")
+        except UnicodeDecodeError:
+            st.error("This file is not UTF-8 text. Save it as UTF-8 and upload it again.")
+        except QuizGenerationError as exc:
+            st.error(str(exc))
+    questions = st.session_state.get("adaptive_quiz_questions", [])
+    if questions:
+        index = st.session_state.get("adaptive_quiz_index", 0)
+        if index < len(questions):
+            strategy = quiz_policy.choose_strategy()
+            ordered = quiz_policy.prioritize(questions, strategy)
+            # Keep the active question stable; only choose the next item using the adaptive policy.
+            current_id = st.session_state.get("adaptive_quiz_current_id")
+            if current_id not in {q["id"] for q in questions}:
+                current_id = None
+            if current_id is None:
+                current = ordered[0]
+                st.session_state["adaptive_quiz_current_id"] = current["id"]
+                st.session_state["adaptive_quiz_started_at"] = time.perf_counter()
+            else:
+                current = next((q for q in questions if q["id"] == current_id), ordered[0])
+            st.progress(min(1.0, (index + 1) / len(questions)), text=f"Question {index + 1} of {len(questions)}")
+            st.markdown(current["question"])
+            st.caption(f"Source file: {current['source_name']} · Generated from a statement in the uploaded notes")
+            answer = st.radio("Choose one answer", current["options"], key=f"adaptive_answer_{current['id']}", index=None)
+            if st.button("Submit answer", key=f"submit_{current['id']}"):
+                if answer is None:
+                    st.warning("Choose an option before submitting.")
+                else:
+                    elapsed = max(0.0, time.perf_counter() - st.session_state.get("adaptive_quiz_started_at", time.perf_counter()))
+                    is_correct = answer.casefold() == current["answer"].casefold()
+                    result = quiz_policy.record_answer(current["id"], is_correct, elapsed)
+                    st.session_state["adaptive_quiz_feedback"] = {
+                        "question_id": current["id"], "correct": is_correct, "answer": current["answer"],
+                        "selected": answer, "elapsed": round(elapsed, 1), "reward": result["reward"],
+                        "wrong": result["wrong"], "slow": result["slow"], "strategy": result["strategy"],
+                    }
+                    st.session_state["adaptive_quiz_answers"][current["id"]] = is_correct
+                    st.session_state["adaptive_quiz_submitted"] = True
+            feedback = st.session_state.get("adaptive_quiz_feedback")
+            if feedback and feedback.get("question_id") == current["id"] and st.session_state.get("adaptive_quiz_submitted"):
+                if feedback["correct"]:
+                    st.success(f"Correct · {feedback['elapsed']}s · RL reward {feedback['reward']:+.2f}")
+                else:
+                    st.error(f"Not quite. The notes-based answer is: {feedback['answer']}")
+                st.write("Source statement:", current["source_sentence"])
+                stats = quiz_policy.stats.get(current["id"], {})
+                if stats.get("wrong", 0) >= 2:
+                    st.warning("This question has been missed repeatedly. The practice policy will prioritize it for targeted review.")
+                elif stats.get("slow", 0) >= 1:
+                    st.info("This question has taken over 20 seconds before. The policy will schedule more review.")
+                if st.button("Next question", key=f"next_{current['id']}"):
+                    st.session_state["adaptive_quiz_index"] = index + 1
+                    st.session_state["adaptive_quiz_current_id"] = None
+                    st.session_state["adaptive_quiz_submitted"] = False
+                    st.session_state["adaptive_quiz_feedback"] = None
+                    st.session_state["adaptive_quiz_started_at"] = time.perf_counter()
+                    st.rerun()
+        else:
+            summary = quiz_policy.summary()
+            st.success("Practice set complete.")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Set accuracy", f"{sum(st.session_state.get('adaptive_quiz_answers', {}).values()) / max(1, len(st.session_state.get('adaptive_quiz_answers', {}))):.0%}")
+            m2.metric("Questions tracked", summary["questions_tracked"])
+            m3.metric("Repeatedly missed", summary["repeatedly_missed"])
+            st.write("Adaptive policy summary")
+            st.json(summary)
+            st.caption("Progress and Q-values persist in the local data folder. This is a small tabular Q-learning practice-prioritization prototype, not a validated cognitive model.")
+            if st.button("Restart this quiz", key="restart_adaptive_quiz"):
+                st.session_state["adaptive_quiz_index"] = 0
+                st.session_state["adaptive_quiz_answers"] = {}
+                st.session_state["adaptive_quiz_feedback"] = None
+                st.session_state["adaptive_quiz_current_id"] = None
+                st.session_state["adaptive_quiz_submitted"] = False
+                st.session_state["adaptive_quiz_started_at"] = time.perf_counter()
+                st.rerun()
 
 with academic_organizer:
     st.subheader("Organize mixed college notes")
