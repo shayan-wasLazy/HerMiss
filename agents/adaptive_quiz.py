@@ -71,7 +71,7 @@ def generate_mcqs(text: str, count: int = 10, source_name: str = "uploaded notes
         # A term must be useful and leave a readable statement when blanked.
         terms.sort(key=lambda t: (len(t.split()), len(t)), reverse=True)
         for answer in terms:
-            blanked = re.sub(re.escape(answer), "________", sentence, count=1, flags=re.I)
+            blanked = re.sub(r"(?<!\\w)" + re.escape(answer) + r"(?!\\w)", "________", sentence, count=1, flags=re.I)
             if blanked == sentence or len(blanked.split()) < 5:
                 continue
             stem = f"According to the uploaded notes, which term completes this statement?\n\n“{blanked}”"
@@ -156,21 +156,25 @@ class AdaptiveQuizPolicy:
         return max(self.ACTIONS, key=lambda action: values.get(action, 0.0))
 
     def record_answer(self, question_id: str, correct: bool, elapsed_seconds: float) -> dict[str, Any]:
-        stats = self.stats.setdefault(question_id, {"attempts": 0, "wrong": 0, "slow": 0, "correct": 0, "last_seconds": 0.0})
+        stats = self.stats.setdefault(question_id, {"attempts": 0, "wrong": 0, "wrong_streak": 0, "correct_streak": 0, "slow": 0, "correct": 0, "last_seconds": 0.0})
         previous_state = self._state()
         stats["attempts"] += 1
         stats["last_seconds"] = round(max(0.0, elapsed_seconds), 2)
         if correct:
             stats["correct"] += 1
+            stats["correct_streak"] = stats.get("correct_streak", 0) + 1
+            stats["wrong_streak"] = 0
         else:
             stats["wrong"] += 1
+            stats["wrong_streak"] = stats.get("wrong_streak", 0) + 1
+            stats["correct_streak"] = 0
         # A response above 20 seconds is treated as slow; user can still be correct.
         if elapsed_seconds > 20:
             stats["slow"] += 1
         reward = (1.0 if correct else -1.0) - (0.35 if elapsed_seconds > 20 else 0.0)
-        if stats["wrong"] >= 2 and not correct:
+        if stats["wrong_streak"] >= 2 and not correct:
             reward -= 0.5
-        action = "target_weak" if stats["wrong"] >= 2 else ("review_slow" if elapsed_seconds > 20 else "mixed_practice")
+        action = "target_weak" if stats["wrong_streak"] >= 2 else ("review_slow" if elapsed_seconds > 20 else "mixed_practice")
         next_state = self._state()
         row = self.q.setdefault(previous_state, {})
         old = row.get(action, 0.0)
@@ -184,7 +188,7 @@ class AdaptiveQuizPolicy:
             "wrong": stats["wrong"],
             "slow": stats["slow"],
             "correct": stats["correct"],
-            "mastered": stats["correct"] >= 2 and stats["wrong"] == 0 and stats["last_seconds"] <= 20,
+            "mastered": stats.get("correct_streak", 0) >= 2 and stats["last_seconds"] <= 20,
         }
 
     def prioritize(self, questions: list[dict[str, Any]], strategy: str) -> list[dict[str, Any]]:
@@ -194,9 +198,9 @@ class AdaptiveQuizPolicy:
             slow = s.get("slow", 0)
             attempts = s.get("attempts", 0)
             if strategy == "target_weak":
-                priority = wrong * 3 + slow
+                priority = s.get("wrong_streak", wrong) * 3 + slow
             elif strategy == "review_slow":
-                priority = slow * 3 + wrong
+                priority = slow * 3 + s.get("wrong_streak", wrong)
             else:
                 priority = wrong + slow + (0.5 if attempts == 0 else 0)
             return (priority, self.random.random())
