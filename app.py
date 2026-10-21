@@ -9,6 +9,7 @@ import streamlit as st
 from agents.planner import PlannerAgent, PlanningError
 from agents.document_planner import build_document_plan, DocumentPlanningError
 from agents.action_agent import ActionAgent
+from automation.academic_organizer import build_organization_plan, apply_organization, extract_zip_safely
 from config.settings import (
     SANDBOX_DIR, LOCAL_WORKSPACE_DIR, DB_PATH, OUTPUT_DIR, RLConfig
 )
@@ -55,7 +56,7 @@ agent = QLearningAgent(
 )
 store = RunStore(DB_PATH)
 
-tab, document_planning, training, history = st.tabs(["Task execution", "Plan from .txt", "RL training", "History"])
+tab, document_planning, academic_organizer, training, history = st.tabs(["Task execution", "Plan from .txt", "Academic organizer", "RL training", "History"])
 with tab:
     st.write("Try multi-step project scaffolding, type-based file organization, or a workspace audit. File actions remain restricted to the selected workspace; mouse, keyboard, and arbitrary application control are not enabled.")
     with st.expander("Example tasks to demonstrate"):
@@ -134,6 +135,73 @@ with document_planning:
             st.error("This file is not UTF-8 text. Save it as UTF-8 and upload it again.")
         except DocumentPlanningError as exc:
             st.error(str(exc))
+
+
+with academic_organizer:
+    st.subheader("Organize mixed college notes")
+    st.write("Upload a ZIP or select a folder already inside the active workspace. HerMiss uses paths, filenames, and readable text snippets to estimate the subject and whether each file looks like theory, a lab, an assignment, a question paper, a presentation, or a project. Review the plan before copying files into the new structure.")
+    source_kind = st.radio("Input source", ["Upload ZIP", "Folder inside active workspace"], horizontal=True, key="academic_source_kind")
+    uploaded_zip = None
+    source_relative = ""
+    if source_kind == "Upload ZIP":
+        uploaded_zip = st.file_uploader("Choose a ZIP of your notes", type=["zip"], key="academic_zip_upload")
+    else:
+        source_relative = st.text_input("Folder path relative to active workspace", placeholder="Mixed_Notes")
+        st.caption(f"Source must be inside: {active_root}")
+    if st.button("Preview organization plan", key="preview_academic_plan"):
+        st.session_state.pop("academic_plan_rows", None)
+        st.session_state.pop("academic_source_tmp", None)
+        try:
+            if source_kind == "Upload ZIP":
+                if uploaded_zip is None:
+                    st.error("Upload a ZIP first.")
+                else:
+                    temp_dir = tempfile.mkdtemp(prefix="hermiss_academic_")
+                    zip_path = Path(temp_dir) / "input.zip"
+                    zip_path.write_bytes(uploaded_zip.getvalue())
+                    extracted = Path(temp_dir) / "extracted"
+                    extract_zip_safely(zip_path, extracted)
+                    st.session_state["academic_source_tmp"] = str(extracted)
+                    rows = build_organization_plan(extracted)
+                    st.session_state["academic_plan_rows"] = rows
+                    st.session_state["academic_plan_source_kind"] = "zip"
+                    st.session_state["academic_plan_temp_root"] = temp_dir
+            else:
+                if not source_relative.strip():
+                    st.error("Enter a folder path relative to the active workspace.")
+                    rows = None
+                else:
+                    source_root = (active_root / source_relative).resolve()
+                    if active_root.resolve() not in source_root.parents or not source_root.is_dir():
+                        st.error("That folder does not exist inside the active workspace.")
+                        rows = None
+                    else:
+                        rows = build_organization_plan(source_root)
+                        st.session_state["academic_source_tmp"] = str(source_root)
+                        st.session_state["academic_plan_rows"] = rows
+                        st.session_state["academic_plan_source_kind"] = "folder"
+                        st.session_state["academic_plan_temp_root"] = ""
+            if st.session_state.get("academic_plan_rows") is not None:
+                st.success(f"Preview ready: {len(st.session_state['academic_plan_rows'])} file(s) classified.")
+        except Exception as exc:
+            st.error(f"Could not inspect this input safely: {exc}")
+    rows = st.session_state.get("academic_plan_rows")
+    if rows is not None:
+        import pandas as pd
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        needs_review = sum(bool(row["needs_review"]) for row in rows)
+        st.metric("Files requiring manual review", needs_review)
+        st.caption("Low-confidence files go to Needs_Review. The organizer copies files and never deletes the source. Subject/type detection is heuristic; PDF and Office document contents are not parsed in this first version, so filenames and folder names matter for those files.")
+        if st.button("Copy files into organized structure", type="primary", key="apply_academic_plan"):
+            try:
+                source_root = Path(st.session_state["academic_source_tmp"])
+                destination_root = active_root / "Organized_College_Notes"
+                result = apply_organization(source_root, destination_root, rows)
+                st.success(f"Copied {result['copied_count']} file(s) into {destination_root}")
+                st.json({"copied_count": result["copied_count"], "skipped_count": result["skipped_count"], "destination": str(destination_root)})
+                st.download_button("Download organization report", data=json.dumps(result, indent=2), file_name="hermiss_organization_report.json", mime="application/json")
+            except Exception as exc:
+                st.error(f"Organization stopped safely: {exc}")
 
 with training:
     st.caption("Training episodes use temporary synthetic sandboxes, not your Desktop workspace.")
