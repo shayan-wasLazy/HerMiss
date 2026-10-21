@@ -172,8 +172,10 @@ with adaptive_quiz:
         index = st.session_state.get("adaptive_quiz_index", 0)
         if index < len(questions):
             strategy = quiz_policy.choose_strategy()
-            ordered = quiz_policy.prioritize(questions, strategy)
-            # Keep the active question stable; only choose the next item using the adaptive policy.
+            answered_ids = set(st.session_state.get("adaptive_quiz_answers", {}).keys())
+            remaining_questions = [q for q in questions if q["id"] not in answered_ids]
+            ordered = quiz_policy.prioritize(remaining_questions or questions, strategy)
+            # Keep the active question stable; only choose the next unanswered item using the adaptive policy.
             current_id = st.session_state.get("adaptive_quiz_current_id")
             if current_id not in {q["id"] for q in questions}:
                 current_id = None
