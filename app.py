@@ -159,6 +159,8 @@ with adaptive_quiz:
                 st.session_state["adaptive_quiz_index"] = 0
                 st.session_state["adaptive_quiz_answers"] = {}
                 st.session_state["adaptive_quiz_feedback"] = None
+                st.session_state["adaptive_quiz_current_id"] = None
+                st.session_state["adaptive_quiz_submitted"] = False
                 st.session_state["adaptive_quiz_started_at"] = time.perf_counter()
                 st.success(f"Generated {len(generated)} MCQs from {quiz_upload.name}. Review the source statement shown with each question.")
         except UnicodeDecodeError:
