@@ -1,4 +1,6 @@
 """HerMiss Streamlit dashboard with sandbox and restricted local-workspace modes."""
+import csv
+import io
 import json
 import tempfile
 import time
@@ -10,6 +12,7 @@ from agents.planner import PlannerAgent, PlanningError
 from agents.document_planner import build_document_plan, DocumentPlanningError
 from agents.action_agent import ActionAgent
 from automation.academic_organizer import build_organization_plan, apply_organization, extract_zip_safely
+from automation.filesystem import SandboxFilesystem
 from config.settings import (
     SANDBOX_DIR, LOCAL_WORKSPACE_DIR, DB_PATH, OUTPUT_DIR, RLConfig
 )
@@ -56,7 +59,7 @@ agent = QLearningAgent(
 )
 store = RunStore(DB_PATH)
 
-tab, document_planning, academic_organizer, training, history = st.tabs(["Task execution", "Plan from .txt", "Academic organizer", "RL training", "History"])
+overview, tab, document_planning, academic_organizer, training, analytics, safety_audit, workflow_builder, experiment_comparison, reports, history = st.tabs(["Overview", "Task automation", "Plan from .txt", "Smart file manager", "RL training studio", "Performance analytics", "Safety & audit", "Workflow builder", "Experiment comparison", "Export reports", "History"])
 with tab:
     st.write("Try multi-step project scaffolding, type-based file organization, or a workspace audit. File actions remain restricted to the selected workspace; mouse, keyboard, and arbitrary application control are not enabled.")
     with st.expander("Example tasks to demonstrate"):
@@ -214,11 +217,128 @@ with training:
                 return PCEnvironment(root, max_steps=RLConfig().max_steps)
             results = train(agent, factory, int(episodes), RLConfig().seed)
         paths = plot_training(results, OUTPUT_DIR)
+        summary = {"run_id": len(st.session_state.get("rl_experiment_runs", [])) + 1, "episodes": int(episodes), "success_rate": sum(r.success for r in results) / max(1, len(results)), "mean_reward": sum(r.total_reward for r in results) / max(1, len(results)), "mean_steps": sum(r.steps for r in results) / max(1, len(results)), "q_values_after": agent.q_value_count}
+        st.session_state.setdefault("rl_experiment_runs", []).append(summary)
         st.metric("Measured success rate", f"{sum(r.success for r in results) / len(results):.1%}")
         st.metric("Mean episode reward", f"{sum(r.total_reward for r in results) / len(results):.2f}")
         st.dataframe([r.__dict__ for r in results])
         for path in paths:
             st.image(str(path))
+
+with overview:
+    runs = store.runs()
+    total_runs = len(runs)
+    successes = sum(1 for row in runs if row[3])
+    try:
+        audit_snapshot = SandboxFilesystem(active_root).audit_workspace()
+    except Exception as exc:
+        audit_snapshot = {"file_count": 0, "folder_count": 0, "total_bytes": 0, "duplicate_groups": []}
+        st.warning(f"Workspace summary unavailable: {exc}")
+    cols = st.columns(4)
+    cols[0].metric("Tasks recorded", total_runs)
+    cols[1].metric("Task success rate", f"{successes / total_runs * 100:.1f}%" if total_runs else "—")
+    cols[2].metric("Files in workspace", audit_snapshot["file_count"])
+    cols[3].metric("Duplicate groups", len(audit_snapshot["duplicate_groups"]))
+    st.subheader("Recent task activity")
+    if runs:
+        st.dataframe([{"Run": r[0], "Task": r[1], "Mode": r[2], "Success": bool(r[3]), "Reward": r[4], "Steps": r[5], "Seconds": round(r[6], 2)} for r in runs[:8]], use_container_width=True, hide_index=True)
+    else:
+        st.info("No tasks recorded yet. Run a task from Task automation to populate this dashboard.")
+    st.subheader("Current workspace")
+    st.code(str(active_root), language=None)
+    st.caption("Overview uses saved task history and a read-only filesystem audit; it does not predict agent capability.")
+
+with analytics:
+    st.subheader("Performance analytics")
+    runs = store.runs()
+    if not runs:
+        st.info("Run a task first. Charts will use saved execution history.")
+    else:
+        rows = [{"run_id": r[0], "success": int(r[3]), "reward": float(r[4]), "steps": int(r[5]), "seconds": float(r[6]), "mode": r[2], "goal": r[1]} for r in reversed(runs)]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+        st.line_chart([{"run_id": r["run_id"], "reward": r["reward"]} for r in rows], x="run_id", y="reward")
+        st.bar_chart([{"result": "Success", "count": sum(r["success"] for r in rows)}, {"result": "Failure", "count": len(rows) - sum(r["success"] for r in rows)}], x="result", y="count")
+        st.metric("Mean steps", f"{sum(r['steps'] for r in rows) / len(rows):.2f}")
+        st.metric("Mean execution time", f"{sum(r['seconds'] for r in rows) / len(rows):.2f} s")
+    training_runs = st.session_state.get("rl_experiment_runs", [])
+    if training_runs:
+        st.subheader("RL training run metrics")
+        st.dataframe(training_runs, use_container_width=True, hide_index=True)
+        st.line_chart([{"run_id": r["run_id"], "mean_reward": r["mean_reward"]} for r in training_runs], x="run_id", y="mean_reward")
+
+with safety_audit:
+    st.subheader("Safety and audit center")
+    st.warning("Auditing is read-only. Organizing and copying files require explicit actions in their respective tabs.")
+    st.write("Execution mode:", mode)
+    st.code(str(active_root), language=None)
+    confirmed = st.checkbox("I understand this scan reads metadata and hashes file contents; it will not modify files.", key="confirm_workspace_audit")
+    if st.button("Run read-only workspace audit", disabled=not confirmed):
+        try:
+            st.session_state["latest_workspace_audit"] = SandboxFilesystem(active_root).audit_workspace()
+            st.session_state["latest_workspace_audit_root"] = str(active_root)
+        except Exception as exc:
+            st.error(f"Audit failed: {exc}")
+    audit = st.session_state.get("latest_workspace_audit")
+    if audit:
+        st.caption(f"Last audited workspace: {st.session_state.get('latest_workspace_audit_root', 'unknown')}")
+        cols = st.columns(4)
+        cols[0].metric("Files", audit["file_count"])
+        cols[1].metric("Folders", audit["folder_count"])
+        cols[2].metric("Total size", f"{audit['total_bytes'] / (1024 * 1024):.2f} MB")
+        cols[3].metric("Duplicate groups", len(audit["duplicate_groups"]))
+        st.dataframe([{"Extension": k, "Count": v} for k, v in audit["extensions"].items()], use_container_width=True, hide_index=True)
+        if audit["duplicate_groups"]:
+            st.dataframe([{"Group": i + 1, "Files": " · ".join(group)} for i, group in enumerate(audit["duplicate_groups"])], use_container_width=True, hide_index=True)
+        else:
+            st.success("No duplicate-content groups found.")
+        st.download_button("Export audit as JSON", data=json.dumps(audit, indent=2), file_name="hermiss_workspace_audit.json", mime="application/json")
+    st.caption("This prototype does not provide general desktop control or automatic rollback. Keep backups before organizing important files.")
+
+with workflow_builder:
+    st.subheader("Visual workflow builder")
+    templates = {
+        "Organize academic notes": [("Inspect archive", "Read paths and supported text snippets", "Read-only"), ("Classify files", "Estimate subject, category and confidence", "Heuristic"), ("Review uncertain files", "Send low-confidence items to Needs_Review", "Human review"), ("Preview destinations", "Show proposed folder tree", "Preview"), ("Copy organized files", "Copy without deleting source files", "Explicit action"), ("Export report", "Save source-to-destination mapping", "Export")],
+        "Audit workspace": [("Enumerate files", "Count files and folders", "Read-only"), ("Calculate hashes", "Group identical file contents by SHA-256", "Read-only"), ("Summarize extensions", "Count file types and total size", "Read-only"), ("Export audit", "Download audit results as JSON", "Export")],
+        "Create project scaffold": [("Parse request", "Extract requested project name", "Planning"), ("Validate paths", "Reject unsafe path components", "Safety check"), ("Create directories", "Create the planned project tree", "Write"), ("Verify result", "Check created directories and report status", "Verification")],
+    }
+    chosen_flow = st.selectbox("Workflow template", list(templates))
+    flow = templates[chosen_flow]
+    st.caption("This is a visual plan preview; it does not run actions by itself.")
+    for i, (name, detail, stage) in enumerate(flow, 1):
+        with st.container(border=True):
+            st.markdown(f"**{i}. {name}**")
+            st.write(detail)
+            st.caption(f"Stage: {stage}")
+            if i < len(flow): st.markdown("↓")
+    workflow_json = {"workflow": chosen_flow, "steps": [{"order": i, "name": x[0], "description": x[1], "stage": x[2]} for i, x in enumerate(flow, 1)]}
+    st.download_button("Export workflow definition (JSON)", data=json.dumps(workflow_json, indent=2), file_name="hermiss_workflow.json", mime="application/json")
+
+with experiment_comparison:
+    st.subheader("Experiment comparison")
+    st.write("Compare recorded training runs. The current training loop uses the existing tabular Q-learning agent on a narrow synthetic folder-creation task; these metrics are not evidence of general PC automation.")
+    experiment_runs = st.session_state.get("rl_experiment_runs", [])
+    if experiment_runs:
+        st.dataframe(experiment_runs, use_container_width=True, hide_index=True)
+        st.bar_chart([{"Run": f"Run {r['run_id']}", "Mean reward": r["mean_reward"]} for r in experiment_runs], x="Run", y="Mean reward")
+        st.bar_chart([{"Run": f"Run {r['run_id']}", "Success rate (%)": r["success_rate"] * 100} for r in experiment_runs], x="Run", y="Success rate (%)")
+        st.download_button("Export experiment comparison", data=json.dumps(experiment_runs, indent=2), file_name="hermiss_rl_experiment_comparison.json", mime="application/json")
+    else:
+        st.info("Start a run in RL training studio. Repeated runs can be compared in this browser session.")
+
+with reports:
+    st.subheader("Exportable reports")
+    runs = store.runs()
+    run_dicts = [{"id": r[0], "goal": r[1], "mode": r[2], "success": bool(r[3]), "reward": r[4], "steps": r[5], "elapsed_seconds": r[6]} for r in runs]
+    st.write("Download task history, RL training summaries, or the most recent workspace audit.")
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=["id", "goal", "mode", "success", "reward", "steps", "elapsed_seconds"])
+    writer.writeheader(); writer.writerows(run_dicts)
+    st.download_button("Download task history (CSV)", data=buffer.getvalue(), file_name="hermiss_task_history.csv", mime="text/csv", disabled=not run_dicts)
+    st.download_button("Download task history (JSON)", data=json.dumps(run_dicts, indent=2), file_name="hermiss_task_history.json", mime="application/json", disabled=not run_dicts)
+    training_runs = st.session_state.get("rl_experiment_runs", [])
+    st.download_button("Download RL training summaries (JSON)", data=json.dumps(training_runs, indent=2), file_name="hermiss_training_summaries.json", mime="application/json", disabled=not training_runs)
+    latest_audit = st.session_state.get("latest_workspace_audit")
+    st.download_button("Download latest audit (JSON)", data=json.dumps(latest_audit, indent=2) if latest_audit else "{}", file_name="hermiss_latest_audit.json", mime="application/json", disabled=not latest_audit)
 
 with history:
     st.dataframe(store.runs(), use_container_width=True)
