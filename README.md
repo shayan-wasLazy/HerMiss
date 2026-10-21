@@ -42,6 +42,12 @@ Enter these in the task box:
 4. **Basic task**
    `Create a folder called College`
 
+## Adaptive quiz from notes
+
+Open **Adaptive quiz**, upload readable UTF-8 `.txt` notes, and generate a short MCQ set. The first implementation creates four-option fill-the-key-term questions from sentences in the uploaded text, showing the original source statement after answering. It does not yet parse PDF/Word files or semantically synthesize expert questions, so prose definitions and explanatory sentences work better than headings or fragments.
+
+A tabular Q-learning practice policy records correctness and response time locally in `data/quiz_progress.json`. Repeated misses receive a stronger negative reward; answers taking over 20 seconds are flagged for review. The policy chooses a practice strategy (target weak questions, review slow questions, or mixed practice) and prioritizes questions using tracked performance. This is an experimental adaptive-practice mechanism, not a validated learning-science model. Progress is local to the machine/session running the app; do not expect it to follow a user across separate cloud deployments.
+
 ## Plan from a text file
 
 Open the **Plan from .txt** tab and upload a UTF-8 `.txt` file such as `portion.txt`. It extracts bullet points, numbered entries, headings/lines, and comma- or semicolon-separated topics, then builds an ordered checklist, rough per-topic time estimates, session groupings, and a downloadable JSON plan. This is a deterministic heuristic planner: review its extracted topics and estimates before relying on it. It generates a plan; it does not execute arbitrary instructions found in uploaded files.
