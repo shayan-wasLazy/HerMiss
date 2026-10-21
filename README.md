@@ -74,3 +74,9 @@ storage/      SQLite Q-table and task history
 evaluation/   Baseline, benchmark, metrics and plots
 tests/        Unit and safety tests
 ```
+
+## Academic notes organizer
+
+Open the **Academic organizer** tab to upload a mixed-notes ZIP or select an existing folder inside the active workspace. Preview the proposed subject and document-type labels before applying. The organizer copies files into `Organized_College_Notes/<Subject>/<Type>/`, and sends low-confidence files to `Needs_Review/`. Existing source files are not deleted and name collisions receive a suffix rather than being overwritten. ZIP extraction rejects path traversal and symbolic-link entries.
+
+This first version is deliberately heuristic: it looks at folder paths, filenames, and snippets from supported plain-text formats. It does not yet semantically read PDF or Office document contents, so descriptive filenames/folder names improve classification. Verify the preview and manually review uncertain files before relying on the output. Use **Safe simulation** to test first.
