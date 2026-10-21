@@ -80,3 +80,21 @@ tests/        Unit and safety tests
 Open the **Academic organizer** tab to upload a mixed-notes ZIP or select an existing folder inside the active workspace. Preview the proposed subject and document-type labels before applying. The organizer copies files into `Organized_College_Notes/<Subject>/<Type>/`, and sends low-confidence files to `Needs_Review/`. Existing source files are not deleted and name collisions receive a suffix rather than being overwritten. ZIP extraction rejects path traversal and symbolic-link entries.
 
 This first version is deliberately heuristic: it looks at folder paths, filenames, and snippets from supported plain-text formats. It does not yet semantically read PDF or Office document contents, so descriptive filenames/folder names improve classification. Verify the preview and manually review uncertain files before relying on the output. Use **Safe simulation** to test first.
+
+## Dashboard modules
+
+The Streamlit UI now includes:
+- **Overview:** saved task counts, task success rate, current workspace file count, duplicate groups, and recent task activity.
+- **Task automation:** existing template-based planner and restricted filesystem task execution.
+- **Smart file manager:** the academic organizer supports ZIP uploads or folders inside the active workspace, previews heuristic classifications, copies organized files, and exports a mapping report.
+- **RL training studio:** trains the current tabular Q-learning agent on a synthetic folder-creation task and plots measured episode metrics.
+- **Performance analytics:** charts recorded task rewards, success/failure counts, execution time, steps, and current-session training summaries.
+- **Safety & audit:** requires explicit confirmation before a read-only workspace audit; shows extension counts and duplicate SHA-256 groups.
+- **Workflow builder:** preview and export predefined workflow plans as JSON. It is a plan visualizer, not a free-form drag-and-drop editor and does not execute workflows itself.
+- **Experiment comparison:** compares RL training summaries created during the current Streamlit browser session. This is not yet a cross-algorithm benchmark.
+- **Export reports:** download task history as CSV/JSON, training summaries as JSON, and the latest audit as JSON.
+- **History:** displays persisted task runs and Q-table entry count.
+
+### Dashboard interpretation and limitations
+
+Dashboard metrics reflect recorded runs and workspace contents. Training summaries are held in Streamlit session state and may reset when the session ends. The existing trainer currently learns on a narrow synthetic folder-creation task; these dashboard additions do not change that training environment or establish general desktop automation. The app does not currently offer pause/resume for running tasks or automatic rollback. Use a copy of important files and verify output reports before relying on file organization.
