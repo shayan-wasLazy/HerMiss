@@ -5,6 +5,7 @@ This is not an LLM and does not infer facts that are absent from the uploaded te
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import re
@@ -88,7 +89,7 @@ def generate_mcqs(text: str, count: int = 10, source_name: str = "uploaded notes
             options = rng.sample(distractors, 3) + [answer]
             rng.shuffle(options)
             questions.append({
-                "id": f"q{len(questions) + 1}",
+                "id": hashlib.sha1(f"{source_name}:{sentence}:{answer}".encode("utf-8")).hexdigest()[:12],
                 "question": stem,
                 "source_sentence": sentence,
                 "answer": answer,
