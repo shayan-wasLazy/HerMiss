@@ -71,7 +71,7 @@ def generate_mcqs(text: str, count: int = 10, source_name: str = "uploaded notes
         # A term must be useful and leave a readable statement when blanked.
         terms.sort(key=lambda t: (len(t.split()), len(t)), reverse=True)
         for answer in terms:
-            blanked = re.sub(r"(?<!\\w)" + re.escape(answer) + r"(?!\\w)", "________", sentence, count=1, flags=re.I)
+            blanked = re.sub(r"(?<!\w)" + re.escape(answer) + r"(?!\w)", "________", sentence, count=1, flags=re.I)
             if blanked == sentence or len(blanked.split()) < 5:
                 continue
             stem = f"According to the uploaded notes, which term completes this statement?\n\n“{blanked}”"
